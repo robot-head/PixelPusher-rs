@@ -1,9 +1,8 @@
-mod registry {
-    pub fn discover() {
+extern crate byteorder;
+extern crate hwaddr;
 
-    }
+pub mod discovery;
 
-}
 
 #[cfg(test)]
 mod tests {

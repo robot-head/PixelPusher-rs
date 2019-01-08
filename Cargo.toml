@@ -5,4 +5,5 @@ authors = ["Matt Stone <matthew.d.stone@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-nom = "4.1.1"
+hwaddr = "0.1.5"
+byteorder = "1.2.7"
