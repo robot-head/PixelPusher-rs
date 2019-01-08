@@ -1,5 +1,7 @@
 extern crate byteorder;
 extern crate hwaddr;
+extern crate timer;
+extern crate chrono;
 
 pub mod discovery;
 

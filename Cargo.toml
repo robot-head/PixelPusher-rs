@@ -7,3 +7,5 @@ edition = "2018"
 [dependencies]
 hwaddr = "0.1.5"
 byteorder = "1.2.7"
+timer = "0.2.0"
+chrono = "0.4.6"

@@ -1,37 +1,18 @@
 use std::net::Ipv4Addr;
 use std::io::Cursor;
+use std::time::Duration;
 use byteorder::{LittleEndian, ReadBytesExt};
 
 use hwaddr::HwAddr;
 
-/**
- * Device Header format:
- * uint8_t mac_address[6];
- * uint8_t ip_address[4];
- * uint8_t device_type;
- * uint8_t protocol_version; // for the device, not the discovery
- * uint16_t vendor_id;
- * uint16_t product_id;
- * uint16_t hw_revision;
- * uint16_t sw_revision;
- * uint32_t link_speed; // in bits per second
- */
+use std::vec::Vec;
+use std::net::UdpSocket;
+use std::sync::mpsc::channel;
+use std::thread;
+use std::time::SystemTime;
+use std::collections::HashSet;
 
-/**
-  * PixelPusher Header continues:
-  * uint8_t strips_attached;
-  * uint8_t max_strips_per_packet;
-  * uint16_t pixels_per_strip; // uint16_t used to make alignment work
-  * uint32_t update_period; // in microseconds
-  * uint32_t power_total; // in PWM units
-  * uint32_t delta_sequence; // difference between received and expected
-  * sequence numbers
-  * int32_t controller_ordinal;  // configured order number for controller
-  * int32_t group_ordinal;  // configured group number for this controller
-  * int16_t artnet_universe;
-  * int16_t artnet_channel;
-  * int16_t my_port;
-  */
+
 #[derive(Debug, PartialEq)]
 pub enum DeviceType {
     ETHERDREAM,
@@ -76,8 +57,6 @@ pub enum Header {
 }
 
 impl Header {
-
-
     fn parse(buf: [u8; 84]) -> Header {
         let hw_addr = HwAddr::from(&buf[0..6]);
         let mut rdr = Cursor::new(&buf[..]);
@@ -144,12 +123,62 @@ impl Header {
     }
 }
 
+pub fn discover(timeout_secs: u64) -> Vec<Header> {
+    let (tx_headers, rx_headers) = channel();
+
+    thread::spawn(move || {
+        let socket = UdpSocket::bind("0.0.0.0:7331").unwrap();
+        let mut buf = [0; 84];
+        loop {
+            let (_amt, _snd) = socket.recv_from(&mut buf).unwrap();
+            tx_headers.send(Header::parse(buf));
+        }
+    });
+
+
+    let mut headers: Vec<Header> = Vec::new();
+    let start = SystemTime::now();
+    let mut seen_macs = HashSet::new();
+    loop {
+        if (start + Duration::from_secs(timeout_secs)) < SystemTime::now() {
+            break;
+        }
+        let header = rx_headers.recv_timeout(Duration::from_secs(timeout_secs));
+        if header.is_ok() {
+            let val = header.unwrap();
+            let mut mac_addr: String;
+            match &val {
+                Header::PixelPusherHeader(pusher_header) => {
+                    mac_addr = pusher_header.device_header.mac_addr.to_string();
+                }
+                Header::DeviceHeader(device_header) => {
+                    mac_addr = device_header.mac_addr.to_string();
+                }
+            }
+            if seen_macs.contains(&mac_addr) {
+                continue;
+            }
+            seen_macs.insert(mac_addr);
+            headers.push(val);
+        } else {
+            break;
+        }
+    }
+
+    return headers;
+}
 
 #[cfg(test)]
 mod tests {
     use std::net::UdpSocket;
     use super::*;
 
+
+    #[test]
+    fn test_discover() {
+        let headers = discover(3);
+        assert_eq!(headers.len(), 1);
+    }
 
     #[test]
     fn test_can_parse_live_discovery() {
@@ -160,13 +189,12 @@ mod tests {
         let device_header = Header::parse(buf);
 
         match device_header {
-            Header::PixelPusherHeader(header) => {
+            Header::PixelPusherHeader(_header) => {
                 // TODO
-            },
+            }
             _ => {
                 panic!("Expected to find a PixelPusher")
             }
         }
-
     }
 }
