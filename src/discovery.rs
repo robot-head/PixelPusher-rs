@@ -1,17 +1,15 @@
-use std::net::Ipv4Addr;
+use std::collections::HashSet;
 use std::io::Cursor;
-use std::time::Duration;
-use byteorder::{LittleEndian, ReadBytesExt};
-
-use hwaddr::HwAddr;
-
-use std::vec::Vec;
+use std::net::Ipv4Addr;
 use std::net::UdpSocket;
 use std::sync::mpsc::channel;
 use std::thread;
+use std::time::Duration;
 use std::time::SystemTime;
-use std::collections::HashSet;
+use std::vec::Vec;
 
+use byteorder::{LittleEndian, ReadBytesExt};
+use hwaddr::HwAddr;
 
 #[derive(Debug, PartialEq)]
 pub enum DeviceType {
@@ -78,14 +76,14 @@ impl Header {
         let link_speed = rdr.read_u32::<LittleEndian>().unwrap();
         let device_header = DeviceHeader {
             mac_addr: hw_addr,
-            ip_addr: ip_addr,
-            device_type: device_type,
-            protocol_version: protocol_version,
-            vendor_id: vendor_id,
-            product_id: product_id,
-            hw_revision: hw_revision,
-            sw_revision: sw_revision,
-            link_speed: link_speed,
+            ip_addr,
+            device_type,
+            protocol_version,
+            vendor_id,
+            product_id,
+            hw_revision,
+            sw_revision,
+            link_speed,
         };
         match device_header.device_type {
             DeviceType::PIXELPUSHER => {
@@ -101,18 +99,18 @@ impl Header {
                 let artnet_channel = rdr.read_u16::<LittleEndian>().unwrap();
                 let my_port = rdr.read_u16::<LittleEndian>().unwrap();
                 let pusher_header = PixelPusherHeader {
-                    device_header: device_header,
-                    strips_attached: strips_attached,
-                    max_strips_per_packet: max_strips_per_packet,
-                    pixels_per_strip: pixels_per_strip,
-                    update_period: update_period,
-                    power_total: power_total,
-                    delta_sequence: delta_sequence,
-                    controller: controller,
-                    group: group,
-                    artnet_universe: artnet_universe,
-                    artnet_channel: artnet_channel,
-                    my_port: my_port,
+                    device_header,
+                    strips_attached,
+                    max_strips_per_packet,
+                    pixels_per_strip,
+                    update_period,
+                    power_total,
+                    delta_sequence,
+                    controller,
+                    group,
+                    artnet_universe,
+                    artnet_channel,
+                    my_port,
                 };
                 return Header::PixelPusherHeader(pusher_header);
             }
@@ -170,31 +168,11 @@ pub fn discover(timeout_secs: u64) -> Vec<Header> {
 
 #[cfg(test)]
 mod tests {
-    use std::net::UdpSocket;
     use super::*;
-
 
     #[test]
     fn test_discover() {
         let headers = discover(3);
         assert_eq!(headers.len(), 1);
-    }
-
-    #[test]
-    fn test_can_parse_live_discovery() {
-        let socket = UdpSocket::bind("0.0.0.0:7331").unwrap();
-        let mut buf = [0; 84];
-        let (amt, _) = socket.recv_from(&mut buf).unwrap();
-        assert_eq!(amt, 84);
-        let device_header = Header::parse(buf);
-
-        match device_header {
-            Header::PixelPusherHeader(_header) => {
-                // TODO
-            }
-            _ => {
-                panic!("Expected to find a PixelPusher")
-            }
-        }
     }
 }
