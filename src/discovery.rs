@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 use std::io::Cursor;
+use std::io::Error;
+use std::io::ErrorKind;
 use std::net::Ipv4Addr;
 use std::net::UdpSocket;
 use std::sync::mpsc::channel;
@@ -10,6 +12,11 @@ use std::vec::Vec;
 
 use byteorder::{LittleEndian, ReadBytesExt};
 use hwaddr::HwAddr;
+use log::{info, trace, warn};
+
+#[derive(Debug, Clone)]
+struct ParseError;
+
 
 #[derive(Debug, PartialEq)]
 pub enum DeviceType {
@@ -20,8 +27,8 @@ pub enum DeviceType {
 }
 
 #[derive(Debug)]
-pub struct DeviceHeader {
-    mac_addr: HwAddr,
+pub struct BaseHeader {
+    hw_addr: HwAddr,
     ip_addr: Ipv4Addr,
     device_type: DeviceType,
     protocol_version: u8,
@@ -34,7 +41,7 @@ pub struct DeviceHeader {
 
 #[derive(Debug)]
 pub struct PixelPusherHeader {
-    device_header: DeviceHeader,
+    base_header: BaseHeader,
     strips_attached: u8,
     max_strips_per_packet: u8,
     pixels_per_strip: u16,
@@ -50,32 +57,31 @@ pub struct PixelPusherHeader {
 
 #[derive(Debug)]
 pub enum Header {
-    DeviceHeader(DeviceHeader),
     PixelPusherHeader(PixelPusherHeader),
 }
 
 impl Header {
-    fn parse(buf: [u8; 84]) -> Header {
+    fn parse(buf: [u8; 84]) -> Result<Header, std::io::Error> {
         let hw_addr = HwAddr::from(&buf[0..6]);
         let mut rdr = Cursor::new(&buf[..]);
         rdr.set_position(6);
-        let ipu32 = rdr.read_u32::<LittleEndian>().unwrap();
+        let ipu32 = rdr.read_u32::<LittleEndian>()?;
         let ip_addr = Ipv4Addr::from(ipu32);
-        let device_type_u8 = rdr.read_u8().unwrap();
+        let device_type_u8 = rdr.read_u8()?;
         let device_type = match device_type_u8 {
             0 => DeviceType::ETHERDREAM,
             1 => DeviceType::LUMIABRIDGE,
             2 => DeviceType::PIXELPUSHER,
             _ => DeviceType::UNKNOWN,
         };
-        let protocol_version = rdr.read_u8().unwrap();
-        let vendor_id = rdr.read_u16::<LittleEndian>().unwrap();
-        let product_id = rdr.read_u16::<LittleEndian>().unwrap();
-        let hw_revision = rdr.read_u16::<LittleEndian>().unwrap();
-        let sw_revision = rdr.read_u16::<LittleEndian>().unwrap();
-        let link_speed = rdr.read_u32::<LittleEndian>().unwrap();
-        let device_header = DeviceHeader {
-            mac_addr: hw_addr,
+        let protocol_version = rdr.read_u8()?;
+        let vendor_id = rdr.read_u16::<LittleEndian>()?;
+        let product_id = rdr.read_u16::<LittleEndian>()?;
+        let hw_revision = rdr.read_u16::<LittleEndian>()?;
+        let sw_revision = rdr.read_u16::<LittleEndian>()?;
+        let link_speed = rdr.read_u32::<LittleEndian>()?;
+        let base_header = BaseHeader {
+            hw_addr,
             ip_addr,
             device_type,
             protocol_version,
@@ -85,21 +91,21 @@ impl Header {
             sw_revision,
             link_speed,
         };
-        match device_header.device_type {
+        match base_header.device_type {
             DeviceType::PIXELPUSHER => {
-                let strips_attached = rdr.read_u8().unwrap();
-                let max_strips_per_packet = rdr.read_u8().unwrap();
-                let pixels_per_strip = rdr.read_u16::<LittleEndian>().unwrap();
-                let update_period = rdr.read_u32::<LittleEndian>().unwrap();
-                let power_total = rdr.read_u32::<LittleEndian>().unwrap();
-                let delta_sequence = rdr.read_u32::<LittleEndian>().unwrap();
-                let controller = rdr.read_u32::<LittleEndian>().unwrap();
-                let group = rdr.read_u32::<LittleEndian>().unwrap();
-                let artnet_universe = rdr.read_u16::<LittleEndian>().unwrap();
-                let artnet_channel = rdr.read_u16::<LittleEndian>().unwrap();
-                let my_port = rdr.read_u16::<LittleEndian>().unwrap();
+                let strips_attached = rdr.read_u8()?;
+                let max_strips_per_packet = rdr.read_u8()?;
+                let pixels_per_strip = rdr.read_u16::<LittleEndian>()?;
+                let update_period = rdr.read_u32::<LittleEndian>()?;
+                let power_total = rdr.read_u32::<LittleEndian>()?;
+                let delta_sequence = rdr.read_u32::<LittleEndian>()?;
+                let controller = rdr.read_u32::<LittleEndian>()?;
+                let group = rdr.read_u32::<LittleEndian>()?;
+                let artnet_universe = rdr.read_u16::<LittleEndian>()?;
+                let artnet_channel = rdr.read_u16::<LittleEndian>()?;
+                let my_port = rdr.read_u16::<LittleEndian>()?;
                 let pusher_header = PixelPusherHeader {
-                    device_header,
+                    base_header,
                     strips_attached,
                     max_strips_per_packet,
                     pixels_per_strip,
@@ -112,18 +118,19 @@ impl Header {
                     artnet_channel,
                     my_port,
                 };
-                return Header::PixelPusherHeader(pusher_header);
+                Ok(Header::PixelPusherHeader(pusher_header))
             }
             _ => {
-                return Header::DeviceHeader(device_header);
+                Err(Error::new(ErrorKind::Other, "Unrecognized device type"))
             }
         }
     }
 }
 
-pub fn discover(timeout_secs: u64) -> Vec<Header> {
+pub fn discover(timeout_secs: u64) -> Option<Vec<Header>> {
     let (tx_headers, rx_headers) = channel();
 
+    trace!("Spawn discovery listener thread");
     thread::spawn(move || {
         let socket = UdpSocket::bind("0.0.0.0:7331").unwrap();
         let mut buf = [0; 84];
@@ -139,31 +146,38 @@ pub fn discover(timeout_secs: u64) -> Vec<Header> {
     let mut seen_macs = HashSet::new();
     loop {
         if (start + Duration::from_secs(timeout_secs)) < SystemTime::now() {
+            trace!("Discovery timeout ended");
             break;
         }
         let header = rx_headers.recv_timeout(Duration::from_secs(timeout_secs));
         if header.is_ok() {
-            let val = header.unwrap();
+            let parse_result: Result<Header, Error> = header.unwrap();
+            if parse_result.is_err() {
+                warn!("{}", parse_result.unwrap_err());
+                continue;
+            }
+            let val = parse_result.unwrap();
             let mut mac_addr: String;
+
             match &val {
                 Header::PixelPusherHeader(pusher_header) => {
-                    mac_addr = pusher_header.device_header.mac_addr.to_string();
-                }
-                Header::DeviceHeader(device_header) => {
-                    mac_addr = device_header.mac_addr.to_string();
+                    mac_addr = pusher_header.base_header.hw_addr.to_string();
                 }
             }
             if seen_macs.contains(&mac_addr) {
+                trace!("Seen device already at addr {}", mac_addr);
                 continue;
             }
             seen_macs.insert(mac_addr);
             headers.push(val);
         } else {
-            break;
+            warn!("{}", header.unwrap_err());
         }
     }
-
-    return headers;
+    if headers.is_empty() {
+        ()
+    }
+    Some(headers)
 }
 
 #[cfg(test)]
@@ -173,6 +187,6 @@ mod tests {
     #[test]
     fn test_discover() {
         let headers = discover(3);
-        assert_eq!(headers.len(), 1);
+        assert_eq!(headers.is_some());
     }
 }
