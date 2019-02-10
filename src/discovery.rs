@@ -23,7 +23,13 @@ pub fn discover(timeout_secs: u64) -> Option<Vec<Header>> {
         let mut buf = [0; 84];
         loop {
             let (_amt, _snd) = socket.recv_from(&mut buf).unwrap();
-            tx_headers.send(Header::parse(buf));
+            let result = Header::parse(buf);
+            if result.is_ok() {
+                let header = result.unwrap();
+                tx_headers.send(header);
+            } else {
+                warn!("{}", result.unwrap_err());
+            }
         }
     });
 
@@ -37,12 +43,7 @@ pub fn discover(timeout_secs: u64) -> Option<Vec<Header>> {
         }
         let header = rx_headers.recv_timeout(Duration::from_secs(timeout_secs));
         if header.is_ok() {
-            let parse_result: Result<Header, Error> = header.unwrap();
-            if parse_result.is_err() {
-                warn!("{}", parse_result.unwrap_err());
-                continue;
-            }
-            let val = parse_result.unwrap();
+            let val = header.unwrap();
             let mut mac_addr: String;
 
             match &val {
