@@ -6,7 +6,7 @@ extern crate log;
 pub mod discovery;
 pub mod canvas;
 pub mod registry;
-
+pub mod device;
 
 #[cfg(test)]
 mod tests {
