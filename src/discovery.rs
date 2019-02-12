@@ -7,14 +7,16 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::vec::Vec;
 
+use hwaddr::HwAddr;
 use log::{info, trace, warn};
 
-use crate::device::Header;
+use crate::device::DeviceHeader;
+use crate::device::parse_header;
 
 #[derive(Debug, Clone)]
 struct ParseError;
 
-pub fn discover(timeout_secs: u64) -> Option<Vec<Header>> {
+pub fn discover(timeout_secs: u64) -> Option<Vec<Box<DeviceHeader>>> {
     let (tx_headers, rx_headers) = channel();
 
     trace!("Spawn discovery listener thread");
@@ -23,17 +25,12 @@ pub fn discover(timeout_secs: u64) -> Option<Vec<Header>> {
         let mut buf = [0; 84];
         loop {
             let (_amt, _snd) = socket.recv_from(&mut buf).unwrap();
-            let result = Header::parse(buf);
-            if result.is_ok() {
-                let header = result.unwrap();
-                tx_headers.send(header);
-            } else {
-                warn!("{}", result.unwrap_err());
-            }
+            let dh = parse_header(buf);
+            tx_headers.send(dh);
         }
     });
 
-    let mut headers: Vec<Header> = Vec::new();
+    let mut headers: Vec<Box<DeviceHeader>> = Vec::new();
     let start = SystemTime::now();
     let mut seen_macs = HashSet::new();
     loop {
@@ -44,21 +41,15 @@ pub fn discover(timeout_secs: u64) -> Option<Vec<Header>> {
         let header = rx_headers.recv_timeout(Duration::from_secs(timeout_secs));
         if header.is_ok() {
             let val = header.unwrap();
-            let mut mac_addr: String;
-
-            match &val {
-                Header::PixelPusherHeader(pusher_header) => {
-                    mac_addr = pusher_header.base_header.hw_addr.to_string();
-                }
-            }
+            let mac_addr = val.hw_addr();
             if seen_macs.contains(&mac_addr) {
                 trace!("Seen device already at addr {}", mac_addr);
                 continue;
             }
             seen_macs.insert(mac_addr);
-            headers.push(val);
+            headers.push(Box::from(val));
         } else {
-            warn!("{}", header.unwrap_err());
+            warn!("Timeout reached");
         }
     }
     if headers.is_empty() {
