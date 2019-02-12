@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::io::Error;
 use std::net::UdpSocket;
 use std::sync::mpsc::channel;
 use std::thread;
@@ -7,16 +6,15 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::vec::Vec;
 
-use hwaddr::HwAddr;
 use log::{info, trace, warn};
 
 use crate::device::DeviceHeader;
-use crate::device::parse_header;
+use crate::device::DeviceType;
 
 #[derive(Debug, Clone)]
 struct ParseError;
 
-pub fn discover(timeout_secs: u64) -> Option<Vec<Box<DeviceHeader>>> {
+pub fn discover(timeout_secs: u64) -> Vec<Box<dyn DeviceHeader>> {
     let (tx_headers, rx_headers) = channel();
 
     trace!("Spawn discovery listener thread");
@@ -25,12 +23,12 @@ pub fn discover(timeout_secs: u64) -> Option<Vec<Box<DeviceHeader>>> {
         let mut buf = [0; 84];
         loop {
             let (_amt, _snd) = socket.recv_from(&mut buf).unwrap();
-            let dh = parse_header(buf);
+            let dh = crate::device::parse_header(buf);
             tx_headers.send(dh);
         }
     });
 
-    let mut headers: Vec<Box<DeviceHeader>> = Vec::new();
+    let mut headers: Vec<Box<dyn DeviceHeader>> = Vec::new();
     let start = SystemTime::now();
     let mut seen_macs = HashSet::new();
     loop {
@@ -47,15 +45,23 @@ pub fn discover(timeout_secs: u64) -> Option<Vec<Box<DeviceHeader>>> {
                 continue;
             }
             seen_macs.insert(mac_addr);
-            headers.push(Box::from(val));
+            headers.push(val);
         } else {
             warn!("Timeout reached");
         }
     }
-    if headers.is_empty() {
-        // Return none
+    headers
+}
+
+pub fn discover_type(timeout_secs: u64, device_type: DeviceType) -> Vec<Box<dyn DeviceHeader>> {
+    let all_devices = discover(timeout_secs);
+    let mut filtered_devices: Vec<Box<DeviceHeader>> = Vec::new();
+    for device in all_devices {
+        if device.device_type() == device_type {
+            filtered_devices.push(device);
+        }
     }
-    Some(headers)
+    filtered_devices
 }
 
 #[cfg(test)]

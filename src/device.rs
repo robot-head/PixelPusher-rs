@@ -8,7 +8,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use hwaddr::HwAddr;
 use image::Rgb;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum DeviceType {
     ETHERDREAM,
     LUMIABRIDGE,
@@ -19,6 +19,7 @@ pub enum DeviceType {
 pub trait DeviceHeader {
     fn hw_addr(&self) -> HwAddr;
     fn ip_addr(&self) -> Ipv4Addr;
+    fn device_type(&self) -> DeviceType;
 }
 
 #[derive(Debug)]
@@ -42,6 +43,10 @@ impl DeviceHeader for Header {
 
     fn ip_addr(&self) -> Ipv4Addr {
         self.ip_addr
+    }
+
+    fn device_type(&self) -> DeviceType {
+        DeviceType::UNKNOWN
     }
 }
 
@@ -69,9 +74,13 @@ impl DeviceHeader for PixelPusherHeader {
     fn ip_addr(&self) -> Ipv4Addr {
         self.base_header.ip_addr
     }
+
+    fn device_type(&self) -> DeviceType {
+        DeviceType::PIXELPUSHER
+    }
 }
 
-pub fn parse_header(buf: [u8; 84]) -> impl DeviceHeader {
+pub fn parse_header(buf: [u8; 84]) -> Box<dyn DeviceHeader + Send> {
     let hw_addr = HwAddr::from(&buf[0..6]);
     let mut rdr = Cursor::new(&buf[..]);
     rdr.set_position(6);
@@ -102,7 +111,8 @@ pub fn parse_header(buf: [u8; 84]) -> impl DeviceHeader {
         link_speed,
     };
     match device_type {
-        DeviceType::PIXELPUSHER => return parse_pixelpusher_header(base_header, buf),
+        DeviceType::PIXELPUSHER => return Box::from(parse_pixelpusher_header(base_header, buf)),
+        _ => return Box::from(base_header),
     }
 }
 
@@ -135,21 +145,21 @@ fn parse_pixelpusher_header(base_header: Header, buf: [u8; 84]) -> PixelPusherHe
         my_port,
     }
 }
-
-
-pub struct PixelPusher {
-    header: PixelPusherHeader,
-    buffer: [u8; 480 * 8 * 3],
-    xmit_thread: Thread,
-    update_thread: Thread,
-}
-
-impl PixelPusher {
-    pub fn set_color(&mut self, strip: u8, pixel: u8, color: Rgb<u8>) {
-        let x = &mut self.buffer;
-        let index = ((480 * 3 * strip) + (pixel * 3)) as usize;
-        x[index] = color.data[0];
-        x[index + 1] = color.data[1];
-        x[index + 2] = color.data[2];
-    }
-}
+//
+//
+//pub struct PixelPusher {
+//    header: PixelPusherHeader,
+//    buffer: [u8; 480 * 8 * 3],
+//    xmit_thread: Thread,
+//    update_thread: Thread,
+//}
+//
+//impl PixelPusher {
+//    pub fn set_color(&mut self, strip: u8, pixel: u8, color: Rgb<u8>) {
+//        let x = &mut self.buffer;
+//        let index = ((480 * 3 * strip) + (pixel * 3)) as usize;
+//        x[index] = color.data[0];
+//        x[index + 1] = color.data[1];
+//        x[index + 2] = color.data[2];
+//    }
+//}
