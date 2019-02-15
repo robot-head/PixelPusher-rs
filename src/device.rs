@@ -18,7 +18,7 @@ pub trait DeviceHeader {
     fn hw_addr(&self) -> HwAddr;
     fn ip_addr(&self) -> Ipv4Addr;
     fn device_type(&self) -> DeviceType;
-    fn serialize(&self, wtr: &Vec<u8>);
+    fn serialize(&self) -> Vec<u8>;
 }
 
 #[derive(Debug)]
@@ -47,8 +47,8 @@ impl DeviceHeader for Header {
         DeviceType::UNKNOWN
     }
 
-    fn serialize(&self, wtr: &Vec<u8>) {
-        let mut w = wtr.to_owned();
+    fn serialize(&self) -> Vec<u8> {
+        let mut w = vec!();
         w.extend(self.hw_addr.octets().iter());
         w.extend(self.ip_addr.octets().iter());
         let device_type = match self.device_type {
@@ -56,7 +56,7 @@ impl DeviceHeader for Header {
             DeviceType::LUMIABRIDGE => 1,
             DeviceType::PIXELPUSHER => 2,
             DeviceType::UNKNOWN => 99,
-            _ => 99
+            _ => 99,
         };
         w.push(device_type);
         w.push(self.protocol_version);
@@ -65,6 +65,7 @@ impl DeviceHeader for Header {
         w.write_u16::<LittleEndian>(self.hw_revision).unwrap();
         w.write_u16::<LittleEndian>(self.sw_revision).unwrap();
         w.write_u32::<LittleEndian>(self.link_speed).unwrap();
+        w
     }
 }
 
@@ -97,9 +98,8 @@ impl DeviceHeader for PixelPusherHeader {
         DeviceType::PIXELPUSHER
     }
 
-    fn serialize(&self, wtr: &Vec<u8>) {
-        self.base_header.serialize(wtr);
-        let mut w = wtr.to_owned();
+    fn serialize(&self) -> Vec<u8> {
+        let mut w = self.base_header.serialize();
         w.push(self.strips_attached);
         w.push(self.max_strips_per_packet);
         w.write_u16::<LittleEndian>(self.pixels_per_strip).unwrap();
@@ -111,6 +111,7 @@ impl DeviceHeader for PixelPusherHeader {
         w.write_u16::<LittleEndian>(self.artnet_universe).unwrap();
         w.write_u16::<LittleEndian>(self.artnet_channel).unwrap();
         w.write_u16::<LittleEndian>(self.my_port).unwrap();
+        w
     }
 }
 
@@ -177,6 +178,47 @@ fn parse_pixelpusher_header(base_header: Header, buf: [u8; 84]) -> PixelPusherHe
         artnet_universe,
         artnet_channel,
         my_port,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::Ipv4Addr;
+
+    use hwaddr::HwAddr;
+
+    use crate::device::DeviceHeader;
+    use crate::device::DeviceType;
+    use crate::device::Header;
+    use crate::device::PixelPusherHeader;
+
+    #[test]
+    fn device_header_serialize_works() {
+        let pph = PixelPusherHeader {
+            base_header: Header {
+                hw_addr: HwAddr::from([0, 20, 34, 1, 35, 69]),
+                ip_addr: Ipv4Addr::new(127, 0, 0, 1),
+                device_type: DeviceType::PIXELPUSHER,
+                protocol_version: 3,
+                vendor_id: 22,
+                product_id: 13,
+                hw_revision: 2,
+                sw_revision: 14,
+                link_speed: 12345,
+            },
+            strips_attached: 8,
+            max_strips_per_packet: 2,
+            pixels_per_strip: 480,
+            update_period: 0,
+            power_total: 0,
+            delta_sequence: 0,
+            controller: 1,
+            group: 2,
+            artnet_universe: 3,
+            artnet_channel: 4,
+            my_port: 2345,
+        };
+        assert_eq!(vec!(0), pph.serialize());
     }
 }
 
