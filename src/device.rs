@@ -48,7 +48,7 @@ impl DeviceHeader for Header {
     }
 
     fn serialize(&self) -> Vec<u8> {
-        let mut w = vec!();
+        let mut w = vec![];
         w.extend(self.hw_addr.octets().iter());
         w.extend(self.ip_addr.octets().iter());
         let device_type = match self.device_type {
@@ -218,7 +218,14 @@ mod tests {
             artnet_channel: 4,
             my_port: 2345,
         };
-        assert_eq!(vec!(0), pph.serialize());
+        assert_eq!(
+            vec!(
+                0, 20, 34, 1, 35, 69, 127, 0, 0, 1, 2, 3, 22, 0, 13, 0, 2, 0, 14, 0, 57, 48, 0, 0,
+                8, 2, 224, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 4,
+                0, 41, 9
+            ),
+            pph.serialize()
+        );
     }
 }
 
