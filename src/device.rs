@@ -1,10 +1,8 @@
 use std::io::Cursor;
-use std::io::Error;
-use std::io::ErrorKind;
 use std::net::Ipv4Addr;
 use std::thread::Thread;
 
-use byteorder::{LittleEndian, ReadBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use hwaddr::HwAddr;
 use image::Rgb;
 
@@ -20,6 +18,7 @@ pub trait DeviceHeader {
     fn hw_addr(&self) -> HwAddr;
     fn ip_addr(&self) -> Ipv4Addr;
     fn device_type(&self) -> DeviceType;
+    fn serialize(&self, wtr: &Vec<u8>);
 }
 
 #[derive(Debug)]
@@ -35,7 +34,6 @@ struct Header {
     link_speed: u32,
 }
 
-
 impl DeviceHeader for Header {
     fn hw_addr(&self) -> HwAddr {
         self.hw_addr
@@ -47,6 +45,26 @@ impl DeviceHeader for Header {
 
     fn device_type(&self) -> DeviceType {
         DeviceType::UNKNOWN
+    }
+
+    fn serialize(&self, wtr: &Vec<u8>) {
+        let mut w = wtr.to_owned();
+        w.extend(self.hw_addr.octets().iter());
+        w.extend(self.ip_addr.octets().iter());
+        let device_type = match self.device_type {
+            DeviceType::ETHERDREAM => 0,
+            DeviceType::LUMIABRIDGE => 1,
+            DeviceType::PIXELPUSHER => 2,
+            DeviceType::UNKNOWN => 99,
+            _ => 99
+        };
+        w.push(device_type);
+        w.push(self.protocol_version);
+        w.write_u16::<LittleEndian>(self.vendor_id).unwrap();
+        w.write_u16::<LittleEndian>(self.product_id).unwrap();
+        w.write_u16::<LittleEndian>(self.hw_revision).unwrap();
+        w.write_u16::<LittleEndian>(self.sw_revision).unwrap();
+        w.write_u32::<LittleEndian>(self.link_speed).unwrap();
     }
 }
 
@@ -77,6 +95,22 @@ impl DeviceHeader for PixelPusherHeader {
 
     fn device_type(&self) -> DeviceType {
         DeviceType::PIXELPUSHER
+    }
+
+    fn serialize(&self, wtr: &Vec<u8>) {
+        self.base_header.serialize(wtr);
+        let mut w = wtr.to_owned();
+        w.push(self.strips_attached);
+        w.push(self.max_strips_per_packet);
+        w.write_u16::<LittleEndian>(self.pixels_per_strip).unwrap();
+        w.write_u32::<LittleEndian>(self.update_period).unwrap();
+        w.write_u32::<LittleEndian>(self.power_total).unwrap();
+        w.write_u32::<LittleEndian>(self.delta_sequence).unwrap();
+        w.write_u32::<LittleEndian>(self.controller).unwrap();
+        w.write_u32::<LittleEndian>(self.group).unwrap();
+        w.write_u16::<LittleEndian>(self.artnet_universe).unwrap();
+        w.write_u16::<LittleEndian>(self.artnet_channel).unwrap();
+        w.write_u16::<LittleEndian>(self.my_port).unwrap();
     }
 }
 
@@ -145,21 +179,20 @@ fn parse_pixelpusher_header(base_header: Header, buf: [u8; 84]) -> PixelPusherHe
         my_port,
     }
 }
-//
-//
-//pub struct PixelPusher {
-//    header: PixelPusherHeader,
-//    buffer: [u8; 480 * 8 * 3],
-//    xmit_thread: Thread,
-//    update_thread: Thread,
-//}
-//
-//impl PixelPusher {
-//    pub fn set_color(&mut self, strip: u8, pixel: u8, color: Rgb<u8>) {
-//        let x = &mut self.buffer;
-//        let index = ((480 * 3 * strip) + (pixel * 3)) as usize;
-//        x[index] = color.data[0];
-//        x[index + 1] = color.data[1];
-//        x[index + 2] = color.data[2];
-//    }
-//}
+
+pub struct PixelPusher {
+    header: PixelPusherHeader,
+    buffer: [u8; 480 * 8 * 3],
+    xmit_thread: Thread,
+    update_thread: Thread,
+}
+
+impl PixelPusher {
+    pub fn set_color(&mut self, strip: u8, pixel: u8, color: Rgb<u8>) {
+        let x = &mut self.buffer;
+        let index = (480 * 3 * (strip as usize)) + (pixel as usize * 3);
+        x[index] = color.data[0];
+        x[index + 1] = color.data[1];
+        x[index + 2] = color.data[2];
+    }
+}
